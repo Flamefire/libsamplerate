@@ -1,3 +1,13 @@
+This is a fork of the official libsamplerate that tracks the original master branch but also includes various improvements.
+To date those are:
+
+- Tested on Windows CI: https://github.com/erikd/libsamplerate/pull/82
+- Fix some warnings especially about implicit truncating conversions: https://github.com/erikd/libsamplerate/pull/82
+- Smaller CMake configure step honoring `LIBSAMPLERATE_EXAMPLES` and `LIBSAMPLERATE_TESTS`: https://github.com/erikd/libsamplerate/pull/69
+- Improved speed, up to 2.2x faster: https://github.com/erikd/libsamplerate/pull/94
+
+See also my [PRs](https://github.com/erikd/libsamplerate/pulls/Flamefire) in the official repo.
+
 <img src="http://www.mega-nerd.com/SRC/SRC.png" width="350"></img>
 
 This is libsamplerate, `0.1.9`.
@@ -21,9 +31,9 @@ Additional references:
 
 | Branch         | Status                                                                                                            |
 |----------------|-------------------------------------------------------------------------------------------------------------------|
-| `master`       | [![Build Status](https://travis-ci.org/erikd/libsamplerate.svg?branch=master)](https://travis-ci.org/erikd/libsamplerate)       |
+| `master`       | [![Build Status](https://travis-ci.org/Flamefire/libsamplerate.svg?branch=master)](https://travis-ci.org/Flamefire/libsamplerate)       |
 
-Branches [actively built](https://travis-ci.org/erikd/libsamplerate/branches) by TravisCI.
+Branches [actively built](https://travis-ci.org/Flamefire/libsamplerate/branches) by TravisCI.
 
 ---
 
