@@ -6,6 +6,7 @@
 ** file at : https://github.com/erikd/libsamplerate/blob/master/COPYING
 */
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,6 +94,11 @@ fp_to_double (increment_t x)
 {	return fp_fraction_part (x) * INV_FP_ONE ;
 } /* fp_to_double */
 
+static inline int
+int_div_ceil (int divident, int divisor) /* == (int) ceil ((float) divident / divisor) */
+{	assert (divident >= 0 && divisor > 0) ; /* For positive numbers only */
+	return (divident + (divisor - 1)) / divisor ;
+}
 
 /*----------------------------------------------------------------------------------------
 */
@@ -294,21 +300,26 @@ calc_output_single (SINC_FILTER *filter, increment_t increment, increment_t star
 	filter_index = filter_index + coeff_count * increment ;
 	data_index = filter->b_current - coeff_count ;
 
+	if (data_index < 0) /* Avoid underflow access to filter->buffer. */
+	{	int steps = -data_index ;
+		/* If the assert triggers we would have to take care not to underflow/overflow */
+		assert (steps <= int_div_ceil (filter_index, increment)) ;
+		filter_index -= increment * steps ;
+		data_index += steps ;
+	}
 	left = 0.0 ;
-	do
-	{	if (data_index >= 0) /* Avoid underflow access to filter->buffer. */
-		{	fraction = fp_to_double (filter_index) ;
-			indx = fp_to_int (filter_index) ;
-
-			icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
-
-			left += icoeff * filter->buffer [data_index] ;
-			}  ;
+	while (filter_index >= MAKE_INCREMENT_T (0))
+	{	fraction = fp_to_double (filter_index) ;
+		indx = fp_to_int (filter_index) ;
+		assert (indx >= 0 && indx + 1 < filter->coeff_half_len + 2) ;
+		icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
+		assert (data_index >= 0 && data_index < filter->b_len) ;
+		assert (data_index < filter->b_end) ;
+		left += icoeff * filter->buffer [data_index] ;
 
 		filter_index -= increment ;
 		data_index = data_index + 1 ;
-		}
-	while (filter_index >= MAKE_INCREMENT_T (0)) ;
+		} ;
 
 	/* Now apply the right half of the filter. */
 	filter_index = increment - start_filter_index ;
@@ -320,9 +331,10 @@ calc_output_single (SINC_FILTER *filter, increment_t increment, increment_t star
 	do
 	{	fraction = fp_to_double (filter_index) ;
 		indx = fp_to_int (filter_index) ;
-
+		assert (indx < filter->coeff_half_len + 2) ;
 		icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
-
+		assert (data_index >= 0 && data_index < filter->b_len) ;
+		assert (data_index < filter->b_end) ;
 		right += icoeff * filter->buffer [data_index] ;
 
 		filter_index -= increment ;
@@ -441,22 +453,27 @@ calc_output_stereo (SINC_FILTER *filter, increment_t increment, increment_t star
 	filter_index = filter_index + coeff_count * increment ;
 	data_index = filter->b_current - filter->channels * coeff_count ;
 
+	if (data_index < 0) /* Avoid underflow access to filter->buffer. */
+	{	int steps = int_div_ceil (-data_index, 2) ;
+		/* If the assert triggers we would have to take care not to underflow/overflow */
+		assert (steps <= int_div_ceil (filter_index, increment)) ;
+		filter_index -= increment * steps ;
+		data_index += steps * 2;
+	}
 	left [0] = left [1] = 0.0 ;
-	do
-	{	if (data_index >= 0) /* Avoid underflow access to filter->buffer. */
-		{	fraction = fp_to_double (filter_index) ;
-			indx = fp_to_int (filter_index) ;
-
-			icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
-
-			left [0] += icoeff * filter->buffer [data_index] ;
-			left [1] += icoeff * filter->buffer [data_index + 1] ;
-			} ;
+	while (filter_index >= MAKE_INCREMENT_T (0))
+	{	fraction = fp_to_double (filter_index) ;
+		indx = fp_to_int (filter_index) ;
+		assert (indx >= 0 && indx + 1 < filter->coeff_half_len + 2) ;
+		icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
+		assert (data_index >= 0 && data_index + 1 < filter->b_len) ;
+		assert (data_index + 1 < filter->b_end) ;
+		for (int ch = 0; ch < 2; ch++)
+			left [ch] += icoeff * filter->buffer [data_index + ch] ;
 
 		filter_index -= increment ;
 		data_index = data_index + 2 ;
-		}
-	while (filter_index >= MAKE_INCREMENT_T (0)) ;
+		} ;
 
 	/* Now apply the right half of the filter. */
 	filter_index = increment - start_filter_index ;
@@ -468,19 +485,20 @@ calc_output_stereo (SINC_FILTER *filter, increment_t increment, increment_t star
 	do
 	{	fraction = fp_to_double (filter_index) ;
 		indx = fp_to_int (filter_index) ;
-
+		assert (indx >= 0 && indx + 1 < filter->coeff_half_len + 2) ;
 		icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
-
-		right [0] += icoeff * filter->buffer [data_index] ;
-		right [1] += icoeff * filter->buffer [data_index + 1] ;
+		assert (data_index >= 0 && data_index + 1 < filter->b_len) ;
+		assert (data_index + 1 < filter->b_end) ;
+		for (int ch = 0; ch < 2; ch++)
+			right [ch] += icoeff * filter->buffer [data_index + ch] ;
 
 		filter_index -= increment ;
 		data_index = data_index - 2 ;
 		}
 	while (filter_index > MAKE_INCREMENT_T (0)) ;
 
-	for(int i=0; i<2; ++i)
-		output [i] = (float) (scale * (left [i] + right [i])) ;
+	for (int ch = 0; ch < 2; ch++)
+		output [ch] = (float) (scale * (left [ch] + right [ch])) ;
 } /* calc_output_stereo */
 
 static int
@@ -590,24 +608,27 @@ calc_output_quad (SINC_FILTER *filter, increment_t increment, increment_t start_
 	filter_index = filter_index + coeff_count * increment ;
 	data_index = filter->b_current - filter->channels * coeff_count ;
 
+	if (data_index < 0) /* Avoid underflow access to filter->buffer. */
+	{	int steps = int_div_ceil (-data_index, 4) ;
+		/* If the assert triggers we would have to take care not to underflow/overflow */
+		assert (steps <= int_div_ceil (filter_index, increment)) ;
+		filter_index -= increment * steps ;
+		data_index += steps * 4;
+	}
 	left [0] = left [1] = left [2] = left [3] = 0.0 ;
-	do
-	{	if (data_index >= 0) /* Avoid underflow access to filter->buffer. */
-		{	fraction = fp_to_double (filter_index) ;
-			indx = fp_to_int (filter_index) ;
-
-			icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
-
-			left [0] += icoeff * filter->buffer [data_index] ;
-			left [1] += icoeff * filter->buffer [data_index + 1] ;
-			left [2] += icoeff * filter->buffer [data_index + 2] ;
-			left [3] += icoeff * filter->buffer [data_index + 3] ;
-			} ;
+	while (filter_index >= MAKE_INCREMENT_T (0))
+	{	fraction = fp_to_double (filter_index) ;
+		indx = fp_to_int (filter_index) ;
+		assert (indx >= 0 && indx + 1 < filter->coeff_half_len + 2) ;
+		icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
+		assert (data_index >= 0 && data_index + 3 < filter->b_len) ;
+		assert (data_index + 3 < filter->b_end) ;
+		for (int ch = 0; ch < 4; ch++)
+			left [ch] += icoeff * filter->buffer [data_index + ch] ;
 
 		filter_index -= increment ;
 		data_index = data_index + 4 ;
-		}
-	while (filter_index >= MAKE_INCREMENT_T (0)) ;
+		} ;
 
 	/* Now apply the right half of the filter. */
 	filter_index = increment - start_filter_index ;
@@ -619,21 +640,21 @@ calc_output_quad (SINC_FILTER *filter, increment_t increment, increment_t start_
 	do
 	{	fraction = fp_to_double (filter_index) ;
 		indx = fp_to_int (filter_index) ;
-
+		assert (indx >= 0 && indx + 1 < filter->coeff_half_len + 2) ;
 		icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
+		assert (data_index >= 0 && data_index + 3 < filter->b_len) ;
+		assert (data_index + 3 < filter->b_end) ;
+		for (int ch = 0; ch < 4; ch++)
+			right [ch] += icoeff * filter->buffer [data_index + ch] ;
 
-		right [0] += icoeff * filter->buffer [data_index] ;
-		right [1] += icoeff * filter->buffer [data_index + 1] ;
-		right [2] += icoeff * filter->buffer [data_index + 2] ;
-		right [3] += icoeff * filter->buffer [data_index + 3] ;
 
 		filter_index -= increment ;
 		data_index = data_index - 4 ;
 		}
 	while (filter_index > MAKE_INCREMENT_T (0)) ;
 
-	for(int i=0; i<4; ++i)
-		output [i] = (float) (scale * (left [i] + right [i])) ;
+	for (int ch = 0; ch < 4; ch++)
+		output [ch] = (float) (scale * (left [ch] + right [ch])) ;
 } /* calc_output_quad */
 
 static int
@@ -743,26 +764,27 @@ calc_output_hex (SINC_FILTER *filter, increment_t increment, increment_t start_f
 	filter_index = filter_index + coeff_count * increment ;
 	data_index = filter->b_current - filter->channels * coeff_count ;
 
+	if (data_index < 0) /* Avoid underflow access to filter->buffer. */
+	{	int steps = int_div_ceil (-data_index, 6) ;
+		/* If the assert triggers we would have to take care not to underflow/overflow */
+		assert (steps <= int_div_ceil (filter_index, increment)) ;
+		filter_index -= increment * steps ;
+		data_index += steps * 6;
+	}
 	left [0] = left [1] = left [2] = left [3] = left [4] = left [5] = 0.0 ;
-	do
-	{	if (data_index >= 0) /* Avoid underflow access to filter->buffer. */
-		{	fraction = fp_to_double (filter_index) ;
-			indx = fp_to_int (filter_index) ;
-
-			icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
-
-			left [0] += icoeff * filter->buffer [data_index] ;
-			left [1] += icoeff * filter->buffer [data_index + 1] ;
-			left [2] += icoeff * filter->buffer [data_index + 2] ;
-			left [3] += icoeff * filter->buffer [data_index + 3] ;
-			left [4] += icoeff * filter->buffer [data_index + 4] ;
-			left [5] += icoeff * filter->buffer [data_index + 5] ;
-			} ;
+	while (filter_index >= MAKE_INCREMENT_T (0))
+	{	fraction = fp_to_double (filter_index) ;
+		indx = fp_to_int (filter_index) ;
+		assert (indx >= 0 && indx + 1 < filter->coeff_half_len + 2) ;
+		icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
+		assert (data_index >= 0 && data_index + 5 < filter->b_len) ;
+		assert (data_index + 5 < filter->b_end) ;
+		for (int ch = 0; ch < 6; ch++)
+			left [ch] += icoeff * filter->buffer [data_index + ch] ;
 
 		filter_index -= increment ;
 		data_index = data_index + 6 ;
-		}
-	while (filter_index >= MAKE_INCREMENT_T (0)) ;
+		} ;
 
 	/* Now apply the right half of the filter. */
 	filter_index = increment - start_filter_index ;
@@ -774,23 +796,20 @@ calc_output_hex (SINC_FILTER *filter, increment_t increment, increment_t start_f
 	do
 	{	fraction = fp_to_double (filter_index) ;
 		indx = fp_to_int (filter_index) ;
-
+		assert (indx >= 0 && indx + 1 < filter->coeff_half_len + 2) ;
 		icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
-
-		right [0] += icoeff * filter->buffer [data_index] ;
-		right [1] += icoeff * filter->buffer [data_index + 1] ;
-		right [2] += icoeff * filter->buffer [data_index + 2] ;
-		right [3] += icoeff * filter->buffer [data_index + 3] ;
-		right [4] += icoeff * filter->buffer [data_index + 4] ;
-		right [5] += icoeff * filter->buffer [data_index + 5] ;
+		assert (data_index >= 0 && data_index + 5 < filter->b_len) ;
+		assert (data_index + 5 < filter->b_end) ;
+		for (int ch = 0; ch < 6; ch++)
+			right [ch] += icoeff * filter->buffer [data_index + ch] ;
 
 		filter_index -= increment ;
 		data_index = data_index - 6 ;
 		}
 	while (filter_index > MAKE_INCREMENT_T (0)) ;
 
-	for(int i=0; i<6; ++i)
-		output [i] = (float) (scale * (left [i] + right [i])) ;
+	for (int ch = 0; ch < 6; ch++)
+		output [ch] = (float) (scale * (left [ch] + right [ch])) ;
 } /* calc_output_hex */
 
 static int
@@ -888,10 +907,9 @@ sinc_hex_vari_process (SRC_PRIVATE *psrc, SRC_DATA *data)
 static inline void
 calc_output_multi (SINC_FILTER *filter, increment_t increment, increment_t start_filter_index, int channels, double scale, float * output)
 {	double		fraction, icoeff ;
-	/* The following line is 1999 ISO Standard C. If your compiler complains, get a better compiler. */
 	double		*left, *right ;
 	increment_t	filter_index, max_filter_index ;
-	int			data_index, coeff_count, indx, ch ;
+	int			data_index, coeff_count, indx ;
 
 	left = filter->left_calc ;
 	right = filter->right_calc ;
@@ -905,62 +923,30 @@ calc_output_multi (SINC_FILTER *filter, increment_t increment, increment_t start
 	filter_index = filter_index + coeff_count * increment ;
 	data_index = filter->b_current - channels * coeff_count ;
 
+	if (data_index < 0) /* Avoid underflow access to filter->buffer. */
+	{	int steps = int_div_ceil (-data_index, channels) ;
+		/* If the assert triggers we would have to take care not to underflow/overflow */
+		assert (steps <= int_div_ceil (filter_index, increment)) ;
+		filter_index -= increment * steps ;
+		data_index += steps * channels ;
+	}
+
 	memset (left, 0, sizeof (left [0]) * channels) ;
 
-	do
+	while (filter_index >= MAKE_INCREMENT_T (0))
 	{	fraction = fp_to_double (filter_index) ;
 		indx = fp_to_int (filter_index) ;
-
+		assert (indx >= 0 && indx + 1 < filter->coeff_half_len + 2) ;
 		icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
 
-		if (data_index >= 0) /* Avoid underflow access to filter->buffer. */
-		{	/*
-			**	Duff's Device.
-			**	See : http://en.wikipedia.org/wiki/Duff's_device
-			*/
-			ch = channels ;
-			do
-			{	switch (ch % 8)
-				{	default :
-						ch -- ;
-						left [ch] += icoeff * filter->buffer [data_index + ch] ;
-						/* Falls through. */
-					case 7 :
-						ch -- ;
-						left [ch] += icoeff * filter->buffer [data_index + ch] ;
-						/* Falls through. */
-					case 6 :
-						ch -- ;
-						left [ch] += icoeff * filter->buffer [data_index + ch] ;
-						/* Falls through. */
-					case 5 :
-						ch -- ;
-						left [ch] += icoeff * filter->buffer [data_index + ch] ;
-						/* Falls through. */
-					case 4 :
-						ch -- ;
-						left [ch] += icoeff * filter->buffer [data_index + ch] ;
-						/* Falls through. */
-					case 3 :
-						ch -- ;
-						left [ch] += icoeff * filter->buffer [data_index + ch] ;
-						/* Falls through. */
-					case 2 :
-						ch -- ;
-						left [ch] += icoeff * filter->buffer [data_index + ch] ;
-						/* Falls through. */
-					case 1 :
-						ch -- ;
-						left [ch] += icoeff * filter->buffer [data_index + ch] ;
-					} ;
-				}
-			while (ch > 0) ;
-			} ;
+		assert (data_index >= 0 && data_index + channels - 1 < filter->b_len) ;
+		assert (data_index + channels - 1 < filter->b_end) ;
+		for (int ch = 0; ch < channels; ch++)
+			left [ch] += icoeff * filter->buffer [data_index + ch] ;
 
 		filter_index -= increment ;
 		data_index = data_index + channels ;
-		}
-	while (filter_index >= MAKE_INCREMENT_T (0)) ;
+		} ;
 
 	/* Now apply the right half of the filter. */
 	filter_index = increment - start_filter_index ;
@@ -972,91 +958,20 @@ calc_output_multi (SINC_FILTER *filter, increment_t increment, increment_t start
 	do
 	{	fraction = fp_to_double (filter_index) ;
 		indx = fp_to_int (filter_index) ;
-
+		assert (indx >= 0 && indx + 1 < filter->coeff_half_len + 2) ;
 		icoeff = filter->coeffs [indx] + fraction * (filter->coeffs [indx + 1] - filter->coeffs [indx]) ;
-
-		ch = channels ;
-		do
-		{
-			switch (ch % 8)
-			{	default :
-					ch -- ;
-					right [ch] += icoeff * filter->buffer [data_index + ch] ;
-					/* Falls through. */
-				case 7 :
-					ch -- ;
-					right [ch] += icoeff * filter->buffer [data_index + ch] ;
-					/* Falls through. */
-				case 6 :
-					ch -- ;
-					right [ch] += icoeff * filter->buffer [data_index + ch] ;
-					/* Falls through. */
-				case 5 :
-					ch -- ;
-					right [ch] += icoeff * filter->buffer [data_index + ch] ;
-					/* Falls through. */
-				case 4 :
-					ch -- ;
-					right [ch] += icoeff * filter->buffer [data_index + ch] ;
-					/* Falls through. */
-				case 3 :
-					ch -- ;
-					right [ch] += icoeff * filter->buffer [data_index + ch] ;
-					/* Falls through. */
-				case 2 :
-					ch -- ;
-					right [ch] += icoeff * filter->buffer [data_index + ch] ;
-					/* Falls through. */
-				case 1 :
-					ch -- ;
-					right [ch] += icoeff * filter->buffer [data_index + ch] ;
-				} ;
-			}
-		while (ch > 0) ;
+		assert (data_index >= 0 && data_index + channels - 1 < filter->b_len) ;
+		assert (data_index + channels - 1 < filter->b_end) ;
+		for (int ch = 0; ch < channels; ch++)
+			right [ch] += icoeff * filter->buffer [data_index + ch] ;
 
 		filter_index -= increment ;
 		data_index = data_index - channels ;
 		}
 	while (filter_index > MAKE_INCREMENT_T (0)) ;
 
-	ch = channels ;
-	do
-	{
-		switch (ch % 8)
-		{	default :
-				ch -- ;
-				output [ch] = (float) (scale * (left [ch] + right [ch])) ;
-				/* Falls through. */
-			case 7 :
-				ch -- ;
-				output [ch] = (float) (scale * (left [ch] + right [ch])) ;
-				/* Falls through. */
-			case 6 :
-				ch -- ;
-				output [ch] = (float) (scale * (left [ch] + right [ch])) ;
-				/* Falls through. */
-			case 5 :
-				ch -- ;
-				output [ch] = (float) (scale * (left [ch] + right [ch])) ;
-				/* Falls through. */
-			case 4 :
-				ch -- ;
-				output [ch] = (float) (scale * (left [ch] + right [ch])) ;
-				/* Falls through. */
-			case 3 :
-				ch -- ;
-				output [ch] = (float) (scale * (left [ch] + right [ch])) ;
-				/* Falls through. */
-			case 2 :
-				ch -- ;
-				output [ch] = (float) (scale * (left [ch] + right [ch])) ;
-				/* Falls through. */
-			case 1 :
-				ch -- ;
-				output [ch] = (float) (scale * (left [ch] + right [ch])) ;
-			} ;
-		}
-	while (ch > 0) ;
+	for(int ch = 0; ch < channels; ch++)
+		output [ch] = (float) (scale * (left [ch] + right [ch])) ;
 
 	return ;
 } /* calc_output_multi */
