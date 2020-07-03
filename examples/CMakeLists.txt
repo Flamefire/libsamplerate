@@ -2,6 +2,9 @@ add_library(samplerate_example_audio_out STATIC audio_out.c)
 target_link_libraries(samplerate_example_audio_out PRIVATE samplerate)
 
 if(WIN32)
+    if(NOT DEFINED CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+      set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
+    endif()
     # unistd.h dummy
     target_include_directories(samplerate_example_audio_out PUBLIC ${PROJECT_SOURCE_DIR}/Win32)
 endif()
